@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Smart URL Shortener</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body class="bg-gradient-to-br from-indigo-100 via-white to-blue-100 min-h-screen p-6">
+
+  <div class="max-w-5xl mx-auto">
+
+    <!-- Header -->
+    <div class="text-center mb-10">
+      <h1 class="text-4xl font-bold text-indigo-700">Smart URL Shortener</h1>
+      <p class="text-gray-600 mt-2">Create short links and track analytics in real-time</p>
+    </div>
+
+    <!-- Shortener Card -->
+    <div class="bg-white rounded-2xl shadow-xl p-8 mb-10">
+
+      <h2 class="text-2xl font-semibold mb-4 text-gray-700">Create Short URL</h2>
+
+      <div class="flex gap-3">
+        <input
+          type="text"
+          id="longUrl"
+          placeholder="Enter your long URL (https://example.com)"
+          class="flex-1 border border-gray-300 p-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        />
+        <button
+          id="shortenBtn"
+          class="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-medium transition"
+        >
+          Shorten
+        </button>
+      </div>
+
+      <div id="resultSection" class="mt-4 hidden">
+        <p class="text-green-600 font-medium" id="shortUrl"></p>
+      </div>
+
+      <p id="errorMsg" class="text-red-500 mt-3"></p>
+      <p id="countdownMsg" class="text-orange-500 mt-3 font-medium"></p>
+
+    </div>
+
+    <!-- Analytics Dashboard -->
+    <div class="bg-white rounded-2xl shadow-xl p-8">
+
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-2xl font-semibold text-gray-700">Analytics Dashboard</h2>
+        <button
+          id="refreshBtn"
+          class="bg-green-500 hover:bg-green-600 text-white px-5 py-2 rounded-xl transition"
+        >
+          Refresh
+        </button>
+      </div>
+
+      <select
+        id="urlSelect"
+        class="w-full border border-gray-300 p-3 rounded-xl mb-6 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+      >
+        <option value="">Select a Short URL</option>
+      </select>
+
+      <div class="bg-gray-50 p-4 rounded-xl">
+        <canvas id="clickChart"></canvas>
+      </div>
+
+    </div>
+
+  </div>
+
+
+<!--   
+<script>
+const API_BASE = "http://localhost:5000";
+
+const longUrlInput = document.getElementById("longUrl");
+const shortenBtn = document.getElementById("shortenBtn");
+const shortUrlText = document.getElementById("shortUrl");
+const resultSection = document.getElementById("resultSection");
+const errorMsg = document.getElementById("errorMsg");
+const countdownMsg = document.getElementById("countdownMsg");
+
+const urlSelect = document.getElementById("urlSelect");
+const refreshBtn = document.getElementById("refreshBtn");
+
+let countdownInterval;
+let chartInstance;
+
+// ---------------- SHORTEN URL ----------------
+shortenBtn.addEventListener("click", async () => {
+
+  const longUrl = longUrlInput.value.trim();
+  errorMsg.textContent = "";
+  countdownMsg.textContent = "";
+  resultSection.classList.add("hidden");
+
+  if (!longUrl) {
+    errorMsg.textContent = "Please enter a valid URL.";
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/shorten`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ longUrl })
+    });
+
+    if (response.status === 429) {
+      const data = await response.json();
+      const seconds = data.message.match(/\d+/)[0];
+      startCountdown(Number(seconds));
+      return;
+    }
+
+    if (!response.ok) throw new Error("Server error");
+
+    const data = await response.json();
+
+    shortUrlText.innerHTML =
+      `Short URL: <a class="text-indigo-600 underline" target="_blank"
+      href="${API_BASE}/${data.shortUrl}">
+      ${API_BASE}/${data.shortUrl}</a>`;
+
+    resultSection.classList.remove("hidden");
+    longUrlInput.value = "";
+    fetchUrls();
+
+  } catch (err) {
+    errorMsg.textContent = "Failed to connect to server.";
+  }
+});
+
+// ---------------- 429 COUNTDOWN ----------------
+function startCountdown(seconds) {
+  let timeLeft = seconds;
+
+  shortenBtn.disabled = true;
+  longUrlInput.disabled = true;
+
+  countdownMsg.textContent =
+    `Too many requests. Try again in ${timeLeft}s`;
+
+  countdownInterval = setInterval(() => {
+    timeLeft--;
+    countdownMsg.textContent =
+      `Too many requests. Try again in ${timeLeft}s`;
+
+    if (timeLeft <= 0) {
+      clearInterval(countdownInterval);
+      countdownMsg.textContent = "";
+      shortenBtn.disabled = false;
+      longUrlInput.disabled = false;
+    }
+  }, 1000);
+}
+
+// ---------------- FETCH ALL URLS ----------------
+async function fetchUrls() {
+  try {
+    const res = await fetch(`${API_BASE}/urls`);
+    const urls = await res.json();
+
+    urlSelect.innerHTML =
+      '<option value="">Select a Short URL</option>';
+
+    urls.forEach(url => {
+      const option = document.createElement("option");
+      option.value = url.alias;
+      option.textContent = url.alias;
+      urlSelect.appendChild(option);
+    });
+
+  } catch (err) {
+    console.error("Error fetching URLs");
+  }
+}
+
+// ---------------- SHOW CHART ----------------
+urlSelect.addEventListener("change", async () => {
+  const alias = urlSelect.value;
+  if (!alias) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/urls/${alias}/clicks`);
+    const data = await res.json();
+
+    const ctx = document.getElementById("clickChart");
+
+    if (chartInstance) chartInstance.destroy();
+
+    chartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: ["6d ago","5d ago","4d ago","3d ago","2d ago","Yesterday","Today"],
+        datasets: [{
+          label: "Clicks",
+          data: data.clicks,
+          borderColor: "#6366F1",
+          backgroundColor: "rgba(99,102,241,0.2)",
+          tension: 0.4,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true }
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error("Error loading chart");
+  }
+});
+
+// ---------------- REFRESH ----------------
+refreshBtn.addEventListener("click", fetchUrls);
+
+// Initial Load
+fetchUrls();
+
+</script> -->
+
+<script>
+const API_BASE = "http://backend:5000";
+
+const longUrlInput = document.getElementById("longUrl");
+const shortenBtn = document.getElementById("shortenBtn");
+const shortUrlText = document.getElementById("shortUrl");
+const resultSection = document.getElementById("resultSection");
+const errorMsg = document.getElementById("errorMsg");
+const countdownMsg = document.getElementById("countdownMsg");
+
+const urlSelect = document.getElementById("urlSelect");
+const refreshBtn = document.getElementById("refreshBtn");
+
+let countdownInterval;
+let chartInstance;
+
+// ---------------- SHORTEN URL ----------------
+shortenBtn.addEventListener("click", async () => {
+  const longUrl = longUrlInput.value.trim();
+  errorMsg.textContent = "";
+  countdownMsg.textContent = "";
+  resultSection.classList.add("hidden");
+
+  if (!longUrl) {
+    errorMsg.textContent = "Please enter a valid URL.";
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/shorten`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ longUrl })
+    });
+
+    if (response.status === 429) {
+      const data = await response.json();
+      const seconds = data.message.match(/\d+/)[0];
+      startCountdown(Number(seconds));
+      return;
+    }
+
+    if (!response.ok) throw new Error("Server error");
+
+    const data = await response.json();
+
+    // Display short URL as clickable link
+    const shortHref = `${API_BASE}/${data.shortUrl}`;
+    shortUrlText.innerHTML =
+      `Short URL: <a class="text-indigo-600 underline" target="_blank" href="${shortHref}">${shortHref}</a>`;
+
+    resultSection.classList.remove("hidden");
+    longUrlInput.value = "";
+    fetchUrls();
+
+  } catch (err) {
+    errorMsg.textContent = "Failed to connect to server.";
+    console.error(err);
+  }
+});
+
+// ---------------- 429 COUNTDOWN ----------------
+function startCountdown(seconds) {
+  let timeLeft = seconds;
+
+  shortenBtn.disabled = true;
+  longUrlInput.disabled = true;
+
+  countdownMsg.textContent = `Too many requests. Try again in ${timeLeft}s`;
+
+  countdownInterval = setInterval(() => {
+    timeLeft--;
+    countdownMsg.textContent = `Too many requests. Try again in ${timeLeft}s`;
+
+    if (timeLeft <= 0) {
+      clearInterval(countdownInterval);
+      countdownMsg.textContent = "";
+      shortenBtn.disabled = false;
+      longUrlInput.disabled = false;
+    }
+  }, 1000);
+}
+
+// ---------------- FETCH ALL URLS ----------------
+async function fetchUrls() {
+  try {
+    const res = await fetch(`${API_BASE}/urls`);
+    const urls = await res.json();
+
+    urlSelect.innerHTML = '<option value="">Select a Short URL</option>';
+
+    urls.forEach(url => {
+      const option = document.createElement("option");
+      option.value = url.alias;
+      option.textContent = url.alias;
+      urlSelect.appendChild(option);
+    });
+
+  } catch (err) {
+    console.error("Error fetching URLs", err);
+  }
+}
+
+// ---------------- SHOW CHART ----------------
+urlSelect.addEventListener("change", async () => {
+  const alias = urlSelect.value;
+  if (!alias) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/urls/${alias}/clicks`);
+    const data = await res.json();
+
+    const ctx = document.getElementById("clickChart");
+
+    if (chartInstance) chartInstance.destroy();
+
+    // Simple chart based on click timestamps
+    const labels = data.clicks.map(d => new Date(d).toLocaleDateString());
+    const clickCounts = data.clicks.map(() => 1); // 1 per click
+
+    chartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Clicks",
+          data: clickCounts,
+          borderColor: "#6366F1",
+          backgroundColor: "rgba(99,102,241,0.2)",
+          tension: 0.4,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: true } }
+      }
+    });
+
+  } catch (err) {
+    console.error("Error loading chart", err);
+  }
+});
+
+// ---------------- REFRESH ----------------
+refreshBtn.addEventListener("click", fetchUrls);
+
+// Initial Load
+fetchUrls();
+</script>
+</body>
+</html>
